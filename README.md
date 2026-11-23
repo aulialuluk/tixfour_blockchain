@@ -1,81 +1,86 @@
-# TixFour (MVP)
+# TixFour
 
-Next.js + Supabase + Midtrans Snap Sandbox + ERC-721 di Ethereum Sepolia. QR dinamis TOTP dan PWA luring.
+**TixFour** adalah platform pemesanan dan verifikasi tiket acara digital berbasis web yang menggabungkan pembayaran **Midtrans Snap Sandbox**, pencatatan kepemilikan tiket **ERC-721 (non-transferable)** di jaringan **Ethereum Sepolia**, **QR dinamis TOTP** (berubah setiap 30 detik), serta dukungan **PWA luring (offline-first)** untuk pembeli dan petugas pintu masuk (Event Organizer).
 
-## Struktur
+---
+
+## Fitur Utama & Role Pengguna
+
+1. **Pembeli (`user`)**
+   - Menjelajahi daftar acara, melihat rincian biaya transparan (harga tiket, biaya layanan 2,5%, biaya administrasi, PPN 11% dari total harga tiket, dan biaya metode pembayaran QRIS/VA), serta melakukan checkout via **Midtrans Snap Sandbox**.
+   - Penerbitan tiket NFT otomatis ke smart contract `TixFour` di Ethereum Sepolia setelah pembayaran terkonfirmasi.
+   - Halaman **Tiket Saya** (`/tickets`) memisahkan **Tiket Aktif** (dapat membuka QR TOTP dinamis dan disimpan lokal untuk akses luring) dan **Riwayat Tiket** (tiket yang sudah dipindai/check-in tidak dapat menghasilkan QR lagi).
+   - Verifikasi keaslian token on-chain melalui `/verify/[tokenId]`.
+
+2. **Event Organizer (`eo`)**
+   - **Scanner Tiket** (`/eo/scanner`): memindai QR tiket via kamera atau input manual Token ID & kode OTP 6-digit, bekerja secara **offline-first** menggunakan IndexedDB + verifikasi kriptografis TOTP, lalu menyinkronkan status check-in ke Supabase saat online.
+   - **Dashboard EO** (`/eo/dashboard`): memantau kapasitas tiket, jumlah hadir, distribusi kedatangan per jam, log peserta, dan ekspor laporan CSV.
+
+3. **Admin (`admin`)**
+   - **Dashboard Admin** (`/admin`): membuat, mengedit, dan menghapus acara (otomatis mendaftarkan acara ke smart contract `TixFour` melalui `createEvent`).
+   - **Monitoring Pesanan** (`/admin/monitoring`): menampilkan **Laporan Pencocokan Data** (Acara, Kuota, Smart Contract, Tiket Terbit, Status) serta **Pesanan Tertunda** (cek status Midtrans, batalkan pesanan pending, atau terbitkan ulang NFT).
+
+---
+
+## Struktur Proyek
+
+```text
+contracts/TixFour.sol           Smart contract ERC-721 non-transferable (soulbound-style)
+supabase/
+  schema.sql                    Skema tabel dasar (events, orders, tickets) + RLS
+  migration_phase2.sql          Skema Fase 2 (profiles, eo_id, status minting, check-in)
+  seed_phase2.sql               Data awal (SQL)
+lib/
+  chain.js                      Koneksi ethers.js Sepolia, lock nonce wallet, & sinkronisasi acara
+  mint.js                       Proses minting tiket ERC-721 yang idempoten
+  midtrans.js                   Integrasi Midtrans Snap & Core API Status
+  order-sync.js                 Penyelarasan status pesanan Midtrans -> database -> minting
+  pricing.js                    Perhitungan harga, biaya layanan/admin, PPN 11%, & gateway fee
+  totp.js                       Implementasi TOTP RFC 6238 (WebCrypto)
+  scanner-db.js                 Penyimpanan manifest & antrean check-in luring (IndexedDB)
+app/
+  page.js                       Beranda & daftar acara
+  events/[id]/page.js           Detail acara & checkout Midtrans
+  tickets/page.js               Tiket Saya (Tiket Aktif & Riwayat Tiket)
+  ticket/[tokenId]/page.js      Tampilan tiket & QR TOTP dinamis
+  verify/[tokenId]/page.js      Verifikasi keaslian tiket di smart contract Sepolia
+  admin/page.js                 Dashboard Admin (Kelola Acara)
+  admin/monitoring/page.js      Monitoring Pesanan (Pencocokan Data & Pesanan Tertunda)
+  eo/scanner/page.js            Scanner Tiket EO (Kamera & Input Manual Luring)
+  eo/dashboard/page.js          Dashboard Analitik Kehadiran EO
+  api/                          Endpoint API (orders, midtrans webhook, tickets, admin, eo)
+scripts/
+  seed.mjs                      Seeder akun, acara, & registrasi acara ke smart contract
+  test-all.mjs                  Pengujian otomatis unit (TOTP, pricing, RBAC, db-compat, chain)
+public/
+  sw.js, manifest.json          Konfigurasi PWA luring
 ```
-contracts/TixFour.sol        smart contract (deploy via Remix)
-supabase/schema.sql          tabel + RLS
-lib/                         pricing, chain (ethers), midtrans, mint, totp, api
-app/api/                     orders, webhook, mint, tickets, admin
-app/                         halaman: acara, checkout, tiket saya, tiket (QR), verify, admin
-public/sw.js, manifest.json  PWA
-```
 
-## Langkah 1 - Akun dan kunci
-1. **Supabase**: buat project. Catat Project URL, anon key, service_role key (Settings > API).
-   Authentication > Providers > Email: matikan "Confirm email" selama development.
-2. **Midtrans Sandbox**: daftar di sandbox dashboard. Ambil Server Key dan Client Key (Settings > Access Keys).
-3. **RPC Sepolia**: buat app di Alchemy atau Infura, salin URL HTTPS Sepolia.
-4. **Wallet kustodian**: buat akun MetaMask BARU khusus proyek ini. Export private key-nya. Ambil ETH Sepolia dari faucet
-   (Alchemy / Google Cloud Web3 faucet). Jangan pakai wallet berisi aset asli.
+---
 
-## Langkah 2 - Database
-Supabase > SQL Editor > tempel isi `supabase/schema.sql` > Run.
+## Panduan Pengaturan & Menjalankan Lokal
 
-## Langkah 3 - Deploy smart contract (Remix)
-1. Buka https://remix.ethereum.org, buat file `TixFour.sol`, tempel isi `contracts/TixFour.sol`.
-2. Compile dengan Solidity 0.8.24 atau lebih baru. OpenZeppelin v5 di-import otomatis oleh Remix.
-3. **Uji dulu di Remix VM**: createEvent(1, 2), mint 2 kali, mint ke-3 harus revert "Sold out", mint dengan
-   orderRef sama harus revert, panggil transferFrom harus revert "non-transferable", mint dari akun lain harus revert.
-4. Deploy ke Sepolia: Environment = "Injected Provider - MetaMask" (akun wallet kustodian),
-   constructor `initialOwner` = alamat wallet kustodian.
-5. Salin alamat kontrak ke `CONTRACT_ADDRESS`.
+### 1. Persiapan Layanan & Kunci
+1. **Supabase**: Buat project baru, lalu salin Project URL, `anon key`, dan `service_role key` (Settings > API).
+2. **Midtrans Sandbox**: Daftar di dashboard Midtrans Sandbox dan ambil Server Key serta Client Key (Settings > Access Keys).
+3. **RPC Sepolia & Wallet Kustodian**: Siapkan URL RPC Sepolia (Alchemy/Infura/public RPC) serta wallet khusus pengujian yang memiliki saldo ETH Sepolia.
+4. **Smart Contract**: Deploy `contracts/TixFour.sol` (Solidity `0.8.24`+, OpenZeppelin v5) ke jaringan Sepolia dengan `initialOwner` = alamat wallet kustodian, lalu catat alamat kontraknya ke `CONTRACT_ADDRESS`.
 
-## Langkah 4 - Jalankan lokal
+### 2. Pengaturan Database
+Jalankan isi `supabase/schema.sql` dan `supabase/migration_phase2.sql` di **Supabase > SQL Editor**.
+
+### 3. Konfigurasi Environment & Jalankan Aplikasi
 ```bash
-cp .env.example .env.local     # isi semua nilainya
+cp .env.example .env.local   # lengkapi seluruh variabel, misalnya ADMIN_EMAILS=aul@email.com
 npm install
+node scripts/seed.mjs        # opsional: seed akun uji, acara, & sinkronisasi ke smart contract
 npm run dev
 ```
-`ADMIN_EMAILS` = email akun yang boleh membuka /admin. Daftarkan akun itu dulu lewat halaman /login.
 
-## Langkah 5 - Deploy ke Vercel (disarankan sebelum tes pembayaran)
-Webhook Midtrans butuh URL publik HTTPS, dan service worker hanya jalan di HTTPS.
-1. Push ke GitHub, import di Vercel.
-2. Isi semua variabel di `.env.example` pada Project Settings > Environment Variables.
-3. Deploy. Midtrans Dashboard > Settings > Configuration > **Payment Notification URL**:
-   `https://<domain-kamu>.vercel.app/api/midtrans/webhook`
-   (Untuk lokal: pakai tunnel seperti ngrok / cloudflared ke localhost:3000.)
+Untuk deployment produksi (misalnya Vercel), atur **Payment Notification URL** di Midtrans Dashboard ke:
+`https://<domain-aul>.vercel.app/api/midtrans/webhook`
 
-## Langkah 6 - Isi data awal
-Login sebagai admin > /admin > "Acara baru". Ini menyimpan acara di Supabase DAN memanggil `createEvent` di kontrak
-(butuh ETH Sepolia di wallet kustodian).
-
-## Langkah 7 - Coba alur lengkap
-1. Daftar akun pembeli lain > pilih acara > Bayar.
-2. Di popup Snap Sandbox, pilih QRIS atau VA, lalu selesaikan dengan **Midtrans Simulator**
-   (https://simulator.sandbox.midtrans.com).
-3. Buka /tickets. Status: Dibayar > Menerbitkan > tiket muncul. Cek transaksinya di Sepolia Etherscan.
-4. Buka tiket, QR berganti tiap 30 detik.
-
-## Langkah 8 - Pengujian sesuai proposal
-| Uji | Cara |
-|---|---|
-| Bayar berhasil / gagal / kedaluwarsa | Midtrans Simulator, cek kolom `status` di tabel `orders` |
-| Signature tidak valid | `curl -X POST <url>/api/midtrans/webhook -H "Content-Type: application/json" -d '{"order_id":"x","status_code":"200","gross_amount":"1.00","signature_key":"salah"}'` harus 403 |
-| 100 webhook ganda | Kirim ulang notifikasi yang sama 100x (script loop); `tickets` tetap sejumlah qty |
-| Kuota / non-owner / order sama / transfer | Skenario Remix di Langkah 3, lalu ulangi di Sepolia |
-| Waktu penerbitan < 30 detik | Bandingkan `paid_at` dengan `tickets.created_at` |
-| Mint gagal lalu berhasil | Kosongkan saldo ETH wallet sementara > bayar > isi lagi > buka /tickets atau klik "Coba ulang" di /admin |
-| Luring | Buka halaman tiket saat online, muat ulang sekali, aktifkan mode pesawat, buka lagi: QR tetap berganti |
-
-**Penting untuk uji luring:** gunakan build produksi (URL Vercel atau `npm run build && npm start` di localhost).
-Service worker sengaja dimatikan pada `npm run dev`.
-
-## Keterbatasan yang disengaja (sesuai proposal)
-- Tidak ada cron: pesanan `paid` yang tidak dibuka pembeli dan tidak ditangani admin tetap tertahan.
-- Tiket tidak bisa dipindahtangankan; tidak ada penjualan kembali.
-- Pemindaian/validasi oleh petugas (online maupun offline) belum ada. `/verify/[tokenId]` hanya membuktikan penerbitan.
-- Pemeriksaan kuota di API belum atomik penuh; kontrak tetap menolak penerbitan melebihi `maxSupply`.
-- Tarif gateway (VA Rp4.000, QRIS 0,7%) adalah asumsi proposal dan dihitung di `lib/pricing.js`.
+### 4. Pengujian Otomatis
+```bash
+node scripts/test-all.mjs
+```
