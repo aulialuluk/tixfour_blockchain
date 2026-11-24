@@ -71,14 +71,14 @@ Jalankan isi `supabase/schema.sql` dan `supabase/migration_phase2.sql` di **Supa
 
 ### 3. Konfigurasi Environment & Jalankan Aplikasi
 ```bash
-cp .env.example .env.local   # lengkapi seluruh variabel, misalnya ADMIN_EMAILS=admin@email.com
+cp .env.example .env.local   # lengkapi seluruh variabel, misalnya ADMIN_EMAILS=aul@email.com
 npm install
 node scripts/seed.mjs        # opsional: seed akun uji, acara, & sinkronisasi ke smart contract
 npm run dev
 ```
 
 Untuk deployment produksi (misalnya Vercel), atur **Payment Notification URL** di Midtrans Dashboard ke:
-`https://<domain-aplikasi>.vercel.app/api/midtrans/webhook`
+`https://<domain-aul>.vercel.app/api/midtrans/webhook`
 
 ### 4. Pengujian Otomatis
 ```bash
