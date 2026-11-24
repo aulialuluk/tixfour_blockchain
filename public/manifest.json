@@ -1,0 +1,15 @@
+{
+  "name": "TixFour",
+  "short_name": "TixFour",
+  "description": "Tiket acara berbasis blockchain dengan QR dinamis",
+  "start_url": "/tickets",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#403f46",
+  "theme_color": "#403f46",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
